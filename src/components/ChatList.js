@@ -2,29 +2,17 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import PropTypes from 'prop-types'
 import Header from './Header'
+import { baseServer } from '../settings'
 import burger from '../images/burger.png'
-import search from '../images/search.png'
 import profilePic from '../images/profilePic.jpeg'
 import newChat from '../images/new-chat.png'
 import chatStyles from '../styles/singleChatStyles.module.scss'
 import chatListStyles from '../styles/chatListStyles.module.scss'
 
-const data = [
-  'Общество целых бокалов',
-  'Дженнифер Эшли',
-  'Антон Иванов',
-  'Серёга (должен 2000)',
-  'Мартин',
-  'Сэм с Нижнего',
-  'Айрат работа',
-  'Кеша армия',
-  'ФПМИ-Наука 2019-2020',
-]
-
-function SingleChat({ name, lastTime, lastMessage, indicator, key }) {
+function SingleChat({ name, tag, userId, lastTime, lastMessage, indicator, key }) {
   return (
     <div key={key}>
-      <Link to={`MessageForm/${name}`}>
+      <Link to={`/MessageForm/${tag}/${name}/${userId}`}>
         <div className={chatStyles.chat}>
           <table>
             <tbody>
@@ -56,83 +44,65 @@ function SingleChat({ name, lastTime, lastMessage, indicator, key }) {
 
 SingleChat.propTypes = {
   name: PropTypes.string.isRequired,
+  tag: PropTypes.string.isRequired,
+  userId: PropTypes.number.isRequired,
   lastTime: PropTypes.string.isRequired,
   lastMessage: PropTypes.string.isRequired,
   indicator: PropTypes.string.isRequired,
   key: PropTypes.number.isRequired,
 }
 
-function setAll(name) {
-  const props = {}
-
-  props.name = name
-
-  const messagesOfThisChat = JSON.parse(localStorage.getItem(name)) || []
-
-  if (messagesOfThisChat.length !== 0) {
-    const numberOfMessages = messagesOfThisChat.length
-
-    props.lastTime = messagesOfThisChat[numberOfMessages - 1].time
-
-    let res = ''
-    const lastMessage = messagesOfThisChat[0]
-    if (lastMessage.type === 'text') {
-      const lastMessContent = lastMessage.content
-      const arr = lastMessContent.split(' ')
-      let i = 0
-      let count = arr[i].length
-      while (i < arr.length && count < 100) {
-        res += `${arr[i]} `
-        i += 1
-        if (i < arr.length) {
-          count += arr[i].length
-        }
+function getDisplayOfLastMessage({ lastMessage, lastType }) {
+  // what to display as last message (may be too long or not text)
+  let res = ''
+  if (lastType === 'text') {
+    const arr = lastMessage.split(' ')
+    let count = arr[0].length
+    let flag = false
+    for (const elem of arr) {
+      if (count >= 100) {
+        flag = true
+        break
       }
-      res = res.substr(0, res.length - 1)
-      if (i < arr.length) {
-        res += '...'
-      }
-    } else {
-      res = lastMessage.name
+      res += `${elem} `
+      count += elem.length
     }
-    props.lastMessage = res
-    props.indicator = numberOfMessages
+    res = res.substr(0, res.length - 1)
+    if (flag) {
+      res += '...' // last message too long to fully be displayed
+    }
   } else {
-    props.lastTime = ''
-    props.lastMessage = ''
-    props.indicator = 0
+    res = lastType
   }
 
-  return props
+  return res
 }
 
 class ChatList extends React.Component {
   constructor(props) {
     super(props)
     this.state = {
+      userId: Number(this.props.match.params.userId),
       chats: [],
-    }
-    data.sort(this.compareNumber)
-    for (let i = 0; i < data.length; i += 1) {
-      const currProps = setAll(data[i])
-      currProps.key = i
-      const currChat = SingleChat(currProps)
-      this.state.chats.push(currChat)
     }
   }
 
+  componentDidMount() {
+    this.getChats()
+  }
+
+  getChats() {
+    fetch(`${baseServer}/chats/chat_list/?id=${this.state.userId}`)
+      .then((res) => res.json())
+      .then(({ chats }) => {
+        chats.sort(this.compareNumber)
+        this.setState({ chats })
+      })
+  }
+
   compareNumber(a, b) {
-    if (localStorage.getItem(a) === null) {
-      if (localStorage.getItem(b) === null) {
-        return 0
-      }
-      return 1
-    }
-    if (localStorage.getItem(b) === null) {
-      return -1
-    }
-    const aLen = JSON.parse(localStorage.getItem(a)).length
-    const bLen = JSON.parse(localStorage.getItem(b)).length
+    const aLen = a.indicator
+    const bLen = b.indicator
     if (aLen > bLen) {
       return -1
     }
@@ -146,16 +116,42 @@ class ChatList extends React.Component {
   }
 
   render() {
+    let chatsToDisplay = []
+    let i = 0
+    for (const chat of this.state.chats) {
+      chat.key = i
+      i += 1
+      chat.lastMessage = getDisplayOfLastMessage(chat)
+      chat.userId = this.state.userId
+      const currChat = SingleChat(chat)
+      chatsToDisplay = [...chatsToDisplay, currChat]
+    }
+
     return (
       <div className={chatListStyles.container}>
-        <Header leftImg={burger} rightImg={search} leftLink="/UserProfile" name="Hummingbird" onRightClick={() => {}} />
-        <div className={chatListStyles.chats}>{this.state.chats}</div>
-        <div className={chatListStyles.new_chat}>
+        <Header
+          leftImg={burger}
+          leftLink={`/UserProfile/${this.state.userId}`}
+          rightImg=""
+          rightText="Exit"
+          name="Hummingbird"
+          onRightClick={(event) => {
+            event.preventDefault()
+            window.location.hash = '#/'
+          }}
+        />
+        <div className={chatListStyles.chats}>{chatsToDisplay}</div>
+        <Link to={`/CreateChat/${this.state.userId}`} className={chatListStyles.new_chat}>
           <img src={newChat} height="70px" alt="" />
-        </div>
+        </Link>
       </div>
     )
   }
+}
+
+ChatList.propTypes = {
+  // eslint-disable-next-line react/forbid-prop-types
+  match: PropTypes.object.isRequired,
 }
 
 export default ChatList

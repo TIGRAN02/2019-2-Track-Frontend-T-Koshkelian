@@ -1,7 +1,9 @@
 import React from 'react'
 import PropTypes from 'prop-types'
+import autoBind from 'react-autobind'
 import Header from './Header'
-import toChats from '../images/toChats.png'
+import { baseServer } from '../settings'
+import toChats from '../images/back.png'
 import attach from '../images/attachment.png'
 import geo from '../images/geolocation.png'
 import voice from '../images/voice.png'
@@ -9,9 +11,9 @@ import stop from '../images/stopRecording.png'
 import messageStyles from '../styles/singleMessageStyles.module.scss'
 import formStyles from '../styles/messageFormStyles.module.scss'
 
-function singleTextMessage({ content, time, whose, key }) {
+function singleTextMessage({ userId, content, time, whose, key }) {
   return (
-    <div className={messageStyles.mine} style={{ maxWidth: '75%' }} key={key}>
+    <div className={whose === userId ? messageStyles.mine : messageStyles.yours} style={{ maxWidth: '75%' }} key={key}>
       <div className={messageStyles.content}>{content}</div>
       <div className={messageStyles.time}>{time}</div>
     </div>
@@ -19,15 +21,20 @@ function singleTextMessage({ content, time, whose, key }) {
 }
 
 singleTextMessage.propTypes = {
+  userId: PropTypes.number.isRequired,
   content: PropTypes.string.isRequired,
   time: PropTypes.string.isRequired,
   whose: PropTypes.string.isRequired,
   key: PropTypes.number.isRequired,
 }
 
-function singleImageMessage({ url, time, whose, key }) {
+function singleImageMessage({ userId, url, time, whose, key }) {
   return (
-    <div className={messageStyles.mine} style={{ background: 'rgb(40, 40, 40)' }} key={key}>
+    <div
+      className={whose === userId ? messageStyles.mine : messageStyles.yours}
+      style={{ background: 'rgb(40, 40, 40)' }}
+      key={key}
+    >
       <img src={url} className={messageStyles.image} alt="blob was deleted" />
       <div className={messageStyles.time}>{time}</div>
     </div>
@@ -35,15 +42,20 @@ function singleImageMessage({ url, time, whose, key }) {
 }
 
 singleImageMessage.propTypes = {
+  userId: PropTypes.number.isRequired,
   url: PropTypes.string.isRequired,
   time: PropTypes.string.isRequired,
   whose: PropTypes.string.isRequired,
   key: PropTypes.number.isRequired,
 }
 
-function singleAudioMessage({ url, time, whose, key }) {
+function singleAudioMessage({ userId, url, time, whose, key }) {
   return (
-    <div className={messageStyles.mine} style={{ width: '30%', background: 'rgb(40, 40, 40)' }} key={key}>
+    <div
+      className={whose === userId ? messageStyles.mine : messageStyles.yours}
+      style={{ width: '30%', background: 'rgb(40, 40, 40)' }}
+      key={key}
+    >
       <audio src={url} style={{ width: '100%' }} controls />
       <div className={messageStyles.time}>{time}</div>
     </div>
@@ -51,6 +63,7 @@ function singleAudioMessage({ url, time, whose, key }) {
 }
 
 singleAudioMessage.propTypes = {
+  userId: PropTypes.number.isRequired,
   url: PropTypes.string.isRequired,
   time: PropTypes.string.isRequired,
   whose: PropTypes.string.isRequired,
@@ -72,48 +85,25 @@ class MessageForm extends React.Component {
     this.state = {
       value: '',
       name: this.props.match.params.name,
+      tag: this.props.match.params.tag,
+      userId: Number(this.props.match.params.userId),
+      notMyChannel: true,
       chatStyle: {},
       messages: [],
       chunks: [],
-      audioIcon: voice,
-      audioClick: null,
-    }
-    const allMessages = JSON.parse(localStorage.getItem(this.state.name)) || []
-    for (let i = 0; i < allMessages.length; i += 1) {
-      const currProps = {}
-      currProps.time = allMessages[i].time
-      currProps.whose = allMessages[i].whose
-      currProps.key = i
-      let currMessage = null
-      if (allMessages[i].type === 'text') {
-        currProps.content = allMessages[i].content
-        currMessage = singleTextMessage(currProps)
-      } else if (allMessages[i].type === 'image') {
-        currProps.url = allMessages[i].url
-        currMessage = singleImageMessage(currProps)
-      } else if (allMessages[i].type === 'audio') {
-        currProps.url = allMessages[i].url
-        currMessage = singleAudioMessage(currProps)
-      }
-      this.state.messages.push(currMessage)
+      audioFlag: false,
     }
 
-    this.handleTextSubmit = this.handleTextSubmit.bind(this)
-    this.handleTextChange = this.handleTextChange.bind(this)
-    this.handleImageSubmit = this.handleImageSubmit.bind(this)
-    this.handleImageChange = this.handleImageChange.bind(this)
-    this.sendTextMessage = this.sendTextMessage.bind(this)
-    this.sendImageMessage = this.sendImageMessage.bind(this)
-    this.sendAudioMessage = this.sendAudioMessage.bind(this)
-    this.sendGeo = this.sendGeo.bind(this)
-    this.handleDragEnter = this.handleDragEnter.bind(this)
-    this.handleDragLeave = this.handleDragLeave.bind(this)
-    this.handleDragOver = this.handleDragOver.bind(this)
-    this.handleDrop = this.handleDrop.bind(this)
-    this.handleStartRecording = this.handleStartRecording.bind(this)
-    this.handleEndRecording = this.handleEndRecording.bind(this)
-    this.dataAvailable = this.dataAvailable.bind(this)
-    this.stopRecording = this.stopRecording.bind(this)
+    fetch(`${baseServer}/chats/chat_detail/?tag=${this.state.tag}`)
+      .then((res) => res.json())
+      .then(({ chat }) => {
+        if (!chat[0].channel || chat[0].whose === this.state.userId) {
+          this.setState({ notMyChannel: false })
+        }
+      })
+
+    autoBind(this)
+
     this.fileManager = React.createRef()
     this.messages = React.createRef()
     this.manageFiles = () => this.fileManager.current.click()
@@ -121,14 +111,51 @@ class MessageForm extends React.Component {
     this.mediaRecorder = null
   }
 
-  // _____________geoposition_______________
+  componentDidMount() {
+    this.getMessages(this.state.tag)
+    setInterval(() => this.getMessages(this.state.tag), 100)
+  }
+
+  // ______________messages_________________
+
+  getMessages(tag) {
+    fetch(`${baseServer}/chats/chat/?tag=${tag}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const { messages } = data
+        const count = messages.length - this.state.messages.length - 1 // идем не по всему массиву, а по его части, поэтому for, а не foreach
+        for (let i = count; i >= 0; i -= 1) {
+          const currProps = {}
+          currProps.time = messages[i].time
+          currProps.whose = messages[i].whose
+          currProps.userId = this.state.userId
+          currProps.key = messages.length - i
+          let currMessage
+          if (messages[i].type === 'text') {
+            currProps.content = messages[i].content
+            currMessage = singleTextMessage(currProps)
+          } else {
+            currProps.url = messages[i].url
+            if (messages[i].type === 'image') {
+              currMessage = singleImageMessage(currProps)
+            } else {
+              currMessage = singleAudioMessage(currProps)
+            }
+          }
+          this.setState((state) => {
+            return { messages: [currMessage, ...state.messages] }
+          })
+        }
+      })
+  }
+
+  // _____________geolocation_______________
 
   sendGeo(event) {
     event.preventDefault()
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((position) => {
-        const { latitude } = position.coords
-        const { longitude } = position.coords
+        const { latitude, longitude } = position.coords
         const toSend = `https://www.openstreetmap.org/#map=18/${latitude}/${longitude}`
         this.sendTextMessage(toSend)
       })
@@ -138,26 +165,10 @@ class MessageForm extends React.Component {
   // _______________texts____________________
 
   sendTextMessage(content) {
-    const currProps = {}
-    currProps.content = content
-    currProps.time = new Date().toLocaleTimeString(navigator.language, { hour: '2-digit', minute: '2-digit' })
-    currProps.whose = 'mine'
-    currProps.type = 'text'
-
-    const allMessages = JSON.parse(localStorage.getItem(this.state.name)) || []
-    currProps.key = allMessages.length
-    allMessages.unshift(currProps)
-    localStorage.removeItem(this.state.name)
-    localStorage.setItem(this.state.name, JSON.stringify(allMessages))
-
-    const currMessage = singleTextMessage(currProps)
-
-    const currStateMess = this.state.messages
-    currStateMess.unshift(currMessage)
-
-    this.setState((state) => {
-      return { messages: currStateMess }
-    })
+    fetch(`${baseServer}/chats/send_message/`, {
+      method: 'POST',
+      body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'text', content }),
+    }).then(() => {})
   }
 
   handleTextSubmit(event) {
@@ -175,28 +186,11 @@ class MessageForm extends React.Component {
 
   // _______________images__________________
 
-  sendImageMessage(url, name) {
-    const currProps = {}
-    currProps.url = url
-    currProps.time = new Date().toLocaleTimeString(navigator.language, { hour: '2-digit', minute: '2-digit' })
-    currProps.whose = 'mine'
-    currProps.type = 'image'
-    currProps.name = name
-
-    const allMessages = JSON.parse(localStorage.getItem(this.state.name)) || []
-    currProps.key = allMessages.length
-    allMessages.unshift(currProps)
-    localStorage.removeItem(this.state.name)
-    localStorage.setItem(this.state.name, JSON.stringify(allMessages))
-
-    const currMessage = singleImageMessage(currProps)
-
-    const currStateMess = this.state.messages
-    currStateMess.unshift(currMessage)
-
-    this.setState((state) => {
-      return { messages: currStateMess, value: '' }
-    })
+  sendImageMessage(url) {
+    fetch(`${baseServer}/chats/send_message/`, {
+      method: 'POST',
+      body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'image', url }),
+    }).then(() => {})
   }
 
   handleImageSubmit(files) {
@@ -204,13 +198,6 @@ class MessageForm extends React.Component {
       for (let i = 0; i < files.length; i += 1) {
         const src = window.URL.createObjectURL(files[i])
         const fileName = files[i].name
-
-        const data = new FormData()
-        data.append('image', files[i])
-        fetch('https://tt-front.now.sh/upload', {
-          method: 'POST',
-          body: data,
-        }).then(() => {})
 
         this.sendImageMessage(src, fileName)
         this.messages.current.onload = () => {
@@ -228,28 +215,11 @@ class MessageForm extends React.Component {
 
   // _______________audio____________________
 
-  sendAudioMessage(url, name) {
-    const currProps = {}
-    currProps.url = url
-    currProps.time = new Date().toLocaleTimeString(navigator.language, { hour: '2-digit', minute: '2-digit' })
-    currProps.whose = 'mine'
-    currProps.type = 'audio'
-    currProps.name = name
-
-    const allMessages = JSON.parse(localStorage.getItem(this.state.name)) || []
-    currProps.key = allMessages.length
-    allMessages.unshift(currProps)
-    localStorage.removeItem(this.state.name)
-    localStorage.setItem(this.state.name, JSON.stringify(allMessages))
-
-    const currMessage = singleAudioMessage(currProps)
-
-    const currStateMess = this.state.messages
-    currStateMess.unshift(currMessage)
-
-    this.setState((state) => {
-      return { messages: currStateMess, value: '' }
-    })
+  sendAudioMessage(url) {
+    fetch(`${baseServer}/chats/send_message/`, {
+      method: 'POST',
+      body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'audio', url }),
+    }).then(() => {})
   }
 
   dataAvailable(event) {
@@ -262,37 +232,35 @@ class MessageForm extends React.Component {
   }
 
   stopRecording(event) {
-    this.setState({ audioIcon: voice, audioClick: this.handleStartRecording })
+    this.setState({ audioFlag: false })
 
     const blob = new Blob(this.state.chunks, { type: 'audio/ogg; codecs=opus' })
     this.setState({ chunks: [] })
 
-    const data = new FormData()
-    data.append('audio', blob)
-    fetch('https://tt-front.now.sh/upload', {
-      method: 'POST',
-      body: data,
-    }).then(() => {})
-
     const audioURL = URL.createObjectURL(blob)
-    localStorage.setItem('audio', JSON.stringify(audioURL))
 
     this.sendAudioMessage(audioURL)
-
-    URL.revokeObjectURL(audioURL)
+    this.messages.current.onload = () => {
+      window.URL.revokeObjectURL(audioURL)
+    }
   }
 
   async handleStartRecording(event) {
     event.preventDefault()
-    this.setState({ audioIcon: stop, audioClick: this.handleEndRecording })
 
-    const stream = await getMedia()
-    this.mediaRecorder = new MediaRecorder(stream)
-    this.setState({ chunks: [] })
-    this.mediaRecorder.ondataavailable = this.dataAvailable
-    this.mediaRecorder.onstop = this.stopRecording
+    try {
+      const stream = await getMedia()
+      this.mediaRecorder = new MediaRecorder(stream)
+      this.setState({ chunks: [] })
+      this.mediaRecorder.ondataavailable = this.dataAvailable
+      this.mediaRecorder.onstop = this.stopRecording
 
-    this.mediaRecorder.start()
+      this.setState({ audioFlag: true })
+      this.mediaRecorder.start()
+    } catch (e) {
+      // eslint-disable-next-line no-alert
+      alert('Unable to record audio')
+    }
   }
 
   handleEndRecording(event) {
@@ -329,20 +297,10 @@ class MessageForm extends React.Component {
   // ______________render____________________
 
   render() {
-    return (
-      <form className={formStyles.form} onSubmit={this.handleTextSubmit}>
-        <Header leftImg={toChats} rightImg="" leftLink="/ChatList" name={this.state.name} onRightClick={() => {}} />
-        <div
-          className={formStyles.the_chat}
-          style={this.state.chatStyle}
-          onDragEnter={this.handleDragEnter}
-          onDragLeave={this.handleDragLeave}
-          onDragOver={this.handleDragOver}
-          onDrop={this.handleDrop}
-          ref={this.messages}
-        >
-          {this.state.messages}
-        </div>
+    let formInput = null
+
+    if (!this.state.notMyChannel) {
+      formInput = (
         <div className={formStyles.horizontal}>
           <input
             type="file"
@@ -362,13 +320,38 @@ class MessageForm extends React.Component {
             onChange={this.handleTextChange}
           />
           <img
-            src={this.state.audioIcon}
+            src={this.state.audioFlag ? stop : voice}
             alt="voice message"
             style={{ maxWidth: '29px' }}
             className={formStyles.img}
-            onClick={this.state.audioClick || this.handleStartRecording}
+            onClick={this.state.audioFlag ? this.handleEndRecording : this.handleStartRecording}
           />
         </div>
+      )
+    }
+
+    return (
+      <form className={formStyles.form} onSubmit={this.handleTextSubmit}>
+        <Header
+          leftImg={toChats}
+          rightImg=""
+          rightText=""
+          leftLink={`/ChatList/${this.state.userId}`}
+          name={this.state.name}
+          onRightClick={() => {}}
+        />
+        <div
+          className={formStyles.the_chat}
+          style={this.state.chatStyle}
+          onDragEnter={this.handleDragEnter}
+          onDragLeave={this.handleDragLeave}
+          onDragOver={this.handleDragOver}
+          onDrop={this.handleDrop}
+          ref={this.messages}
+        >
+          {this.state.messages}
+        </div>
+        {formInput}
         <div className={formStyles.empty} />
       </form>
     )

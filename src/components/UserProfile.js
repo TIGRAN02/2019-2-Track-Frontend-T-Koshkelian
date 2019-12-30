@@ -1,87 +1,191 @@
 import React from 'react'
+import autoBind from 'react-autobind'
+import PropTypes from 'prop-types'
 import Header from './Header'
-import toChats from '../images/toChats.png'
+import { baseServer } from '../settings'
+import toChats from '../images/back.png'
 import tick from '../images/tick.png'
-import profileStyles from '../styles/userProfileStyles.module.scss'
+import profileStyles from '../styles/profileAndCreateStyles.module.scss'
 import profilePic from '../images/profilePic.jpeg'
 
 class UserProfile extends React.Component {
   constructor(props) {
     super(props)
     this.state = {
-      initialValueName: JSON.parse(localStorage.getItem('userName')) || '',
-      initialValueTag: JSON.parse(localStorage.getItem('userTag')) || '',
-      initialValueBio: JSON.parse(localStorage.getItem('userBio')) || '',
-      valueName: JSON.parse(localStorage.getItem('userName')) || '',
-      valueTag: JSON.parse(localStorage.getItem('userTag')) || '',
-      valueBio: JSON.parse(localStorage.getItem('userBio')) || '',
-      right: '',
-      onRightClick: () => {},
-      onTickClick: this.onTickClick.bind(this),
+      initialUserName: '',
+      initialUserTag: '',
+      initialUserBio: '',
+      currentUserName: '',
+      currentUserTag: '',
+      currentUserBio: '',
+      oldPassword: '',
+      newPassword: '',
+      changePassword: 0,
+      userId: Number(this.props.match.params.userId),
+      isTick: false,
     }
 
-    this.handleChangeName = this.handleChangeName.bind(this)
-    this.handleChangeTag = this.handleChangeTag.bind(this)
-    this.handleChangeBio = this.handleChangeBio.bind(this)
+    fetch(`${baseServer}/users/profile/?id=${this.state.userId}`)
+      .then((res) => res.json())
+      .then((user) => {
+        this.setState({
+          initialUserName: user.name,
+          initialUserTag: user.tag,
+          initialUserBio: user.bio,
+          currentUserName: user.name,
+          currentUserTag: user.tag,
+          currentUserBio: user.bio,
+        })
+      })
+
+    autoBind(this)
   }
 
   onTickClick(event) {
     event.preventDefault()
-    localStorage.removeItem('userName')
-    localStorage.setItem('userName', JSON.stringify(this.state.valueName))
 
-    localStorage.removeItem('userTag')
-    localStorage.setItem('userTag', JSON.stringify(this.state.valueTag))
+    const toSend = {
+      name: this.state.currentUserName,
+      tag: this.state.currentUserTag,
+      bio: this.state.currentUserBio,
+      old_tag: this.state.initialUserTag,
+    }
 
-    localStorage.removeItem('userBio')
-    localStorage.setItem('userBio', JSON.stringify(this.state.valueBio))
-
-    this.setState((state) => {
-      return {
-        initialValueName: state.valueName,
-        initialValueTag: state.valueTag,
-        initialValueBio: state.valueBio,
-        right: '',
-        onRightClick: () => {},
-      }
+    fetch(`${baseServer}/users/set_user/`, {
+      method: 'POST',
+      body: JSON.stringify(toSend),
     })
+      .then((res) => res.ok)
+      .then((accept) => {
+        if (accept) {
+          this.setState((state) => {
+            return {
+              initialUserName: state.currentUserName,
+              initialUserTag: state.currentUserTag,
+              initialUserBio: state.currentUserBio,
+              isTick: false,
+            }
+          })
+        } else {
+          this.setState((state) => {
+            return {
+              currentUserName: state.initialUserName,
+              currentUserTag: state.initialUserTag,
+              currentUserBio: state.initialUserBio,
+              isTick: false,
+            }
+          })
+        }
+        return this.state.initialUserTag
+      })
+      .then((tag) => {
+        if (this.state.newPassword !== '') {
+          const forPassChange = {
+            old_password: this.state.oldPassword,
+            new_password: this.state.newPassword,
+            tag,
+          }
+          fetch(`${baseServer}/users/change_password/`, {
+            method: 'POST',
+            body: JSON.stringify(forPassChange),
+          }).then((result) => {
+            this.setState({ newPassword: '', oldPassword: '', changePassword: result.ok ? 1 : 2 })
+          })
+        }
+      })
+  }
+
+  openPasswordForm(event) {
+    event.preventDefault()
+    this.setState({ changePassword: 0 })
   }
 
   handleChangeName(event) {
     event.preventDefault()
     const temp = event.target.value
     this.setState((state) => {
-      return { valueName: temp, right: state.initialValueName === temp ? '' : tick, onRightClick: state.onTickClick }
+      return { currentUserName: temp, isTick: state.initialUserName !== temp }
     })
   }
 
   handleChangeTag(event) {
+    event.preventDefault()
     const temp = event.target.value
     this.setState((state) => {
-      return { valueTag: temp, right: state.initialValueTag === temp ? '' : tick, onRightClick: state.onTickClick }
+      return { currentUserTag: temp, isTick: state.initialUserTag !== temp }
     })
   }
 
+  handleChangOldPassword(event) {
+    event.preventDefault()
+    this.setState({ oldPassword: event.target.value })
+  }
+
+  handleChangNewPassword(event) {
+    event.preventDefault()
+    this.setState({ newPassword: event.target.value, isTick: true })
+  }
+
   handleChangeBio(event) {
+    event.preventDefault()
     const temp = event.target.value
     this.setState((state) => {
-      return { valueBio: temp, right: state.initialValueBio === temp ? '' : tick, onRightClick: state.onTickClick }
+      return { currentUserBio: temp, isTick: state.initialUserBio !== temp }
     })
   }
 
   render() {
+    const containerStyles = `${profileStyles.container} ${profileStyles.profileAnim}`
     const nameInputClasses = `${profileStyles.input} ${profileStyles.inputName}`
     const tagInputClasses = `${profileStyles.input} ${profileStyles.inputTag}`
     const bioInputClasses = `${profileStyles.input} ${profileStyles.inputBio}`
+    const passwordTextClasses = `${profileStyles.horizontal} ${profileStyles.interactiveText}`
+
+    let passwordForm
+
+    if (this.state.changePassword === 0) {
+      passwordForm = (
+        <div className={profileStyles.horizontal} style={{ flexGrow: 0 }}>
+          <input
+            type="text"
+            value={this.state.oldPassword}
+            placeholder="Old password"
+            className={`${profileStyles.input} ${profileStyles.inputPassword}`}
+            onChange={this.handleChangOldPassword.bind(this)}
+          />
+          <div className={profileStyles.empty} />
+          <input
+            type="text"
+            value={this.state.newPassword}
+            placeholder="New password"
+            className={`${profileStyles.input} ${profileStyles.inputPassword}`}
+            onChange={this.handleChangNewPassword.bind(this)}
+          />
+        </div>
+      )
+    } else if (this.state.changePassword === 1) {
+      passwordForm = (
+        <div className={passwordTextClasses} onClick={this.openPasswordForm}>
+          Password successfully changed!
+        </div>
+      )
+    } else {
+      passwordForm = (
+        <div className={passwordTextClasses} onClick={this.openPasswordForm}>
+          Could not change password. Tap to try again.
+        </div>
+      )
+    }
 
     return (
-      <div className={profileStyles.container}>
+      <div className={containerStyles}>
         <Header
           leftImg={toChats}
-          rightImg={this.state.right}
-          leftLink="/ChatList"
+          leftLink={`/ChatList/${this.state.userId}`}
+          rightImg={this.state.isTick ? tick : ''}
+          rightText=""
           name="Edit Profile"
-          onRightClick={this.state.onRightClick}
+          onRightClick={this.state.isTick ? this.onTickClick : () => {}}
         />
         <div className={profileStyles.horizontal}>
           <div className={profileStyles.vertical}>
@@ -92,29 +196,35 @@ class UserProfile extends React.Component {
             </div>
             <input
               type="text"
-              value={this.state.valueName}
+              value={this.state.currentUserName}
               placeholder="Your name"
               className={nameInputClasses}
               onChange={this.handleChangeName}
             />
             <input
               type="text"
-              value={this.state.valueTag}
+              value={this.state.currentUserTag}
               placeholder="Your tag"
               className={tagInputClasses}
               onChange={this.handleChangeTag}
             />
             <textarea
-              value={this.state.valueBio}
+              value={this.state.currentUserBio}
               placeholder="Tell something about yourself"
               className={bioInputClasses}
               onChange={this.handleChangeBio}
             />
+            {passwordForm}
           </div>
         </div>
       </div>
     )
   }
+}
+
+UserProfile.propTypes = {
+  // eslint-disable-next-line react/forbid-prop-types
+  match: PropTypes.object.isRequired,
 }
 
 export default UserProfile
