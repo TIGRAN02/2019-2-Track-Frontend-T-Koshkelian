@@ -1,11 +1,12 @@
 import React from 'react'
 import PropTypes from 'prop-types'
 import autoBind from 'react-autobind'
+import Cookies from 'js-cookie'
 import Header from './Header'
 import { baseServer } from '../settings'
-import toChats from '../images/back.png'
 import profileStyles from '../styles/profileAndCreateStyles.module.scss'
-import profilePic from '../images/profilePic.jpeg'
+import profilePic from '../images/profilePic.png'
+import checkAuth from '../static/checkAuth'
 
 class CreateChat extends React.Component {
   constructor(props) {
@@ -23,6 +24,14 @@ class CreateChat extends React.Component {
     }
 
     autoBind(this)
+  }
+
+  componentDidMount() {
+    checkAuth(this.state.userId).then((auth) => {
+      if (!auth) {
+        window.location.hash = '#/'
+      }
+    })
   }
 
   onFillInfo(event) {
@@ -61,6 +70,9 @@ class CreateChat extends React.Component {
     fetch(`${baseServer}/chats/create_chat/`, {
       method: 'POST',
       body: JSON.stringify(toSend),
+      headers: {
+        'X-CSRFToken': Cookies.get('csrftoken'),
+      },
     }).then((res) => {
       if (res.ok) {
         let realTag = this.state.chatTag.replace(' ', '')
@@ -234,7 +246,7 @@ class CreateChat extends React.Component {
     return (
       <div className={containerStyles}>
         <Header
-          leftImg={toChats}
+          leftImg="back"
           leftLink={`/ChatList/${this.state.userId}`}
           rightImg=""
           rightText=""

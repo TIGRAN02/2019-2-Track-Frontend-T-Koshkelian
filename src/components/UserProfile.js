@@ -1,12 +1,12 @@
 import React from 'react'
 import autoBind from 'react-autobind'
 import PropTypes from 'prop-types'
+import Cookies from 'js-cookie'
 import Header from './Header'
 import { baseServer } from '../settings'
-import toChats from '../images/back.png'
-import tick from '../images/tick.png'
 import profileStyles from '../styles/profileAndCreateStyles.module.scss'
-import profilePic from '../images/profilePic.jpeg'
+import profilePic from '../images/profilePic.png'
+import checkAuth from '../static/checkAuth'
 
 class UserProfile extends React.Component {
   constructor(props) {
@@ -25,20 +25,28 @@ class UserProfile extends React.Component {
       isTick: false,
     }
 
-    fetch(`${baseServer}/users/profile/?id=${this.state.userId}`)
-      .then((res) => res.json())
-      .then((user) => {
-        this.setState({
-          initialUserName: user.name,
-          initialUserTag: user.tag,
-          initialUserBio: user.bio,
-          currentUserName: user.name,
-          currentUserTag: user.tag,
-          currentUserBio: user.bio,
-        })
-      })
-
     autoBind(this)
+  }
+
+  componentDidMount() {
+    checkAuth(this.state.userId).then((auth) => {
+      if (!auth) {
+        window.location.hash = '#/'
+      } else {
+        fetch(`${baseServer}/users/profile/?id=${this.state.userId}`)
+          .then((res) => res.json())
+          .then((user) => {
+            this.setState({
+              initialUserName: user.name,
+              initialUserTag: user.tag,
+              initialUserBio: user.bio,
+              currentUserName: user.name,
+              currentUserTag: user.tag,
+              currentUserBio: user.bio,
+            })
+          })
+      }
+    })
   }
 
   onTickClick(event) {
@@ -54,6 +62,9 @@ class UserProfile extends React.Component {
     fetch(`${baseServer}/users/set_user/`, {
       method: 'POST',
       body: JSON.stringify(toSend),
+      headers: {
+        'X-CSRFToken': Cookies.get('csrftoken'),
+      },
     })
       .then((res) => res.ok)
       .then((accept) => {
@@ -88,6 +99,9 @@ class UserProfile extends React.Component {
           fetch(`${baseServer}/users/change_password/`, {
             method: 'POST',
             body: JSON.stringify(forPassChange),
+            headers: {
+              'X-CSRFToken': Cookies.get('csrftoken'),
+            },
           }).then((result) => {
             this.setState({ newPassword: '', oldPassword: '', changePassword: result.ok ? 1 : 2 })
           })
@@ -180,9 +194,9 @@ class UserProfile extends React.Component {
     return (
       <div className={containerStyles}>
         <Header
-          leftImg={toChats}
+          leftImg="back"
           leftLink={`/ChatList/${this.state.userId}`}
-          rightImg={this.state.isTick ? tick : ''}
+          rightImg={this.state.isTick ? 'tick' : ''}
           rightText=""
           name="Edit Profile"
           onRightClick={this.state.isTick ? this.onTickClick : () => {}}

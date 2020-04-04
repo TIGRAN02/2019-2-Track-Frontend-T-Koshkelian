@@ -1,21 +1,20 @@
 import React from 'react'
 import PropTypes from 'prop-types'
 import autoBind from 'react-autobind'
+import Cookies from 'js-cookie'
 import Header from './Header'
-import { baseServer } from '../settings'
-import toChats from '../images/back.png'
-import attach from '../images/attachment.png'
-import geo from '../images/geolocation.png'
-import voice from '../images/voice.png'
-import stop from '../images/stopRecording.png'
+import { baseServer, emojiList } from '../settings'
 import messageStyles from '../styles/singleMessageStyles.module.scss'
 import formStyles from '../styles/messageFormStyles.module.scss'
-// import {messagesSuccess} from '../actions'
+import emojiStyles from '../styles/emojiStyles.module.scss'
+import imagesStyles from '../styles/imagesStyles.module.scss'
+import checkAuth from '../static/checkAuth'
+import parseForEmoji from '../static/parseEmoji'
 
 function singleTextMessage({ userId, content, time, whose, key }) {
   return (
     <div className={whose === userId ? messageStyles.mine : messageStyles.yours} style={{ maxWidth: '75%' }} key={key}>
-      <div className={messageStyles.content}>{content}</div>
+      <div className={messageStyles.content}>{parseForEmoji(content, 0)}</div>
       <div className={messageStyles.time}>{time}</div>
     </div>
   )
@@ -89,6 +88,7 @@ class MessageForm extends React.Component {
       tag: this.props.match.params.tag,
       userId: Number(this.props.match.params.userId),
       notMyChannel: true,
+      emojiOpen: false,
       chatStyle: {},
       messages: [],
       chunks: [],
@@ -109,12 +109,20 @@ class MessageForm extends React.Component {
     this.messages = React.createRef()
     this.manageFiles = () => this.fileManager.current.click()
 
+    this.emojiWindow = this.makeEmojiWindow()
+
     this.mediaRecorder = null
   }
 
   componentDidMount() {
-    this.getMessages(this.state.tag)
-    setInterval(() => this.getMessages(this.state.tag), 100)
+    checkAuth(this.state.userId).then((auth) => {
+      if (!auth) {
+        window.location.hash = '#/'
+      } else {
+        this.getMessages(this.state.tag)
+        setInterval(() => this.getMessages(this.state.tag), 100)
+      }
+    })
   }
 
   // ______________messages_________________
@@ -123,10 +131,8 @@ class MessageForm extends React.Component {
     fetch(`${baseServer}/chats/chat/?tag=${tag}`)
       .then((res) => res.json())
       .then((data) => {
-        // const { messages } = data
-        // this.props.addMessages(messages, this.state.tag)
         const { messages } = data
-        const count = messages.length - this.state.messages.length - 1 // идем не по всему массиву, а по его части, поэтому for, а не foreach
+        const count = messages.length - this.state.messages.length - 1
         for (let i = count; i >= 0; i -= 1) {
           const currProps = {}
           currProps.time = messages[i].time
@@ -171,6 +177,9 @@ class MessageForm extends React.Component {
     fetch(`${baseServer}/chats/send_message/`, {
       method: 'POST',
       body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'text', content }),
+      headers: {
+        'X-CSRFToken': Cookies.get('csrftoken'),
+      },
     }).then(() => {})
   }
 
@@ -193,6 +202,9 @@ class MessageForm extends React.Component {
     fetch(`${baseServer}/chats/send_message/`, {
       method: 'POST',
       body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'image', url }),
+      headers: {
+        'X-CSRFToken': Cookies.get('csrftoken'),
+      },
     }).then(() => {})
   }
 
@@ -222,6 +234,9 @@ class MessageForm extends React.Component {
     fetch(`${baseServer}/chats/send_message/`, {
       method: 'POST',
       body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'audio', url }),
+      headers: {
+        'X-CSRFToken': Cookies.get('csrftoken'),
+      },
     }).then(() => {})
   }
 
@@ -299,8 +314,42 @@ class MessageForm extends React.Component {
 
   // ______________render____________________
 
+  makeEmojiWindow() {
+    const outerArray = []
+    const n = Math.min(Math.sqrt(emojiList.length), 10)
+    for (let i = 0; i < n; i += 1) {
+      const innerArray = []
+      for (let j = 0; j < n; j += 1) {
+        innerArray.push(
+          <div
+            key={j}
+            className={`${emojiStyles[emojiList[i * n + j]]} ${emojiStyles.in_menu}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              this.setState((state) => {
+                return { value: state.value.concat(`:${emojiList[i * n + j]}:`) }
+              })
+              return false
+            }}
+          />,
+        )
+      }
+      outerArray.push(
+        <div key={i} className={emojiStyles.horizontal}>
+          {innerArray}
+        </div>,
+      )
+    }
+    return <div className={emojiStyles.emoji_window}>{outerArray}</div>
+  }
+
   render() {
     let formInput = null
+    let emojiWindow = null
+
+    if (this.state.emojiOpen) {
+      emojiWindow = this.emojiWindow
+    }
 
     if (!this.state.notMyChannel) {
       formInput = (
@@ -313,8 +362,16 @@ class MessageForm extends React.Component {
             ref={this.fileManager}
             onChange={this.handleImageChange}
           />
-          <img src={attach} alt="attachment" className={formStyles.img} onClick={this.manageFiles} />
-          <img src={geo} alt="geolocation" className={formStyles.img} onClick={this.sendGeo} />
+          <div
+            className={`${imagesStyles.attachment} ${formStyles.img}`}
+            style={{ maxWidth: '40px' }}
+            onClick={this.manageFiles}
+          />
+          <div
+            className={`${imagesStyles.geolocation} ${formStyles.img}`}
+            style={{ maxWidth: '29px' }}
+            onClick={this.sendGeo}
+          />
           <input
             type="text"
             value={this.state.value}
@@ -322,11 +379,23 @@ class MessageForm extends React.Component {
             className={formStyles.input}
             onChange={this.handleTextChange}
           />
-          <img
-            src={this.state.audioFlag ? stop : voice}
-            alt="voice message"
+          <div
+            className={`${imagesStyles.cowboy_hat_face} ${formStyles.img}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              this.setState((state) => {
+                return { emojiOpen: !state.emojiOpen }
+              })
+              return false
+            }}
+          />
+          <div
+            className={
+              this.state.audioFlag
+                ? `${imagesStyles.stopRecording} ${formStyles.img}`
+                : `${imagesStyles.voice} ${formStyles.img}`
+            }
             style={{ maxWidth: '29px' }}
-            className={formStyles.img}
             onClick={this.state.audioFlag ? this.handleEndRecording : this.handleStartRecording}
           />
         </div>
@@ -334,9 +403,15 @@ class MessageForm extends React.Component {
     }
 
     return (
-      <form className={formStyles.form} onSubmit={this.handleTextSubmit}>
+      <form
+        className={formStyles.form}
+        onSubmit={this.handleTextSubmit}
+        onClick={() => {
+          this.setState({ emojiOpen: false })
+        }}
+      >
         <Header
-          leftImg={toChats}
+          leftImg="back"
           rightImg=""
           rightText=""
           leftLink={`/ChatList/${this.state.userId}`}
@@ -354,6 +429,7 @@ class MessageForm extends React.Component {
         >
           {this.state.messages}
         </div>
+        {emojiWindow}
         {formInput}
         <div className={formStyles.empty} />
       </form>

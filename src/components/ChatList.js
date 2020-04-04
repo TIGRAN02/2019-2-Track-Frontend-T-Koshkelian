@@ -1,40 +1,32 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import PropTypes from 'prop-types'
+import Cookies from 'js-cookie'
 import Header from './Header'
 import { baseServer } from '../settings'
-import burger from '../images/burger.png'
-import profilePic from '../images/profilePic.jpeg'
-import newChat from '../images/new-chat.png'
+import profilePic from '../images/profilePic.png'
 import chatStyles from '../styles/singleChatStyles.module.scss'
 import chatListStyles from '../styles/chatListStyles.module.scss'
+import imagesStyles from '../styles/imagesStyles.module.scss'
+import checkAuth from '../static/checkAuth'
+import parseForEmoji from '../static/parseEmoji'
 
 function SingleChat({ name, tag, userId, lastTime, lastMessage, indicator, key }) {
   return (
     <div key={key}>
-      <Link to={`/MessageForm/${tag}/${name}/${userId}`}>
+      <Link to={`/MessageForm/${tag}/${name}/${userId}`} className={chatStyles.link}>
         <div className={chatStyles.chat}>
-          <table>
-            <tbody>
-              <tr>
-                <td rowSpan="2" className={chatStyles.for_pic}>
-                  <div className={chatStyles.photo}>
-                    <img src={profilePic} alt="" className={chatStyles.pic} height="100px" width="height" />
-                  </div>
-                </td>
-                <td className={chatStyles.first}>
-                  <div className={chatStyles.name}>{name}</div>
-                  <div className={chatStyles.last_time}>{lastTime}</div>
-                </td>
-              </tr>
-              <tr>
-                <td className={chatStyles.second}>
-                  <div className={chatStyles.last_message}>{lastMessage}</div>
-                  <div className={chatStyles.indicator}>{indicator}</div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <img src={profilePic} alt="" className={chatStyles.photo} height="100px" width="height" />
+          <div className={chatStyles.vertical}>
+            <div className={chatStyles.horizontal}>
+              <div className={chatStyles.name}>{name}</div>
+              <div className={chatStyles.last_time}>{lastTime}</div>
+            </div>
+            <div className={chatStyles.horizontal}>
+              <div className={chatStyles.last_message}>{parseForEmoji(lastMessage, 1)}</div>
+              <div className={chatStyles.indicator}>{indicator}</div>
+            </div>
+          </div>
         </div>
       </Link>
       <hr />
@@ -88,11 +80,22 @@ class ChatList extends React.Component {
   }
 
   componentDidMount() {
-    this.getChats()
+    checkAuth(this.state.userId).then((auth) => {
+      if (!auth) {
+        window.location.hash = '#/'
+      } else {
+        this.getChats()
+      }
+    })
   }
 
   getChats() {
-    fetch(`${baseServer}/chats/chat_list/?id=${this.state.userId}`)
+    fetch(`${baseServer}/chats/chat_list/?id=${this.state.userId}`, {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': Cookies.get('csrftoken'),
+      },
+    })
       .then((res) => res.json())
       .then(({ chats }) => {
         chats.sort(this.compareNumber)
@@ -130,19 +133,29 @@ class ChatList extends React.Component {
     return (
       <div className={chatListStyles.container}>
         <Header
-          leftImg={burger}
+          leftImg="burger"
           leftLink={`/UserProfile/${this.state.userId}`}
           rightImg=""
           rightText="Exit"
           name="Hummingbird"
           onRightClick={(event) => {
             event.preventDefault()
-            window.location.hash = '#/'
+            fetch(`${baseServer}/users/logout/?id=${this.state.userId}`)
+              .then((res) => res.json())
+              .then(() => {
+                window.location.hash = '#/'
+              })
           }}
         />
         <div className={chatListStyles.chats}>{chatsToDisplay}</div>
-        <Link to={`/CreateChat/${this.state.userId}`} className={chatListStyles.new_chat}>
-          <img src={newChat} height="70px" alt="" />
+        <Link to={`/CreateChat/${this.state.userId}`} className={chatListStyles.new_chat_button}>
+          <div
+            className={`${imagesStyles.new_chat} ${chatListStyles.new_chat_button}`}
+            style={{
+              height: '70px',
+              width: '70px',
+            }}
+          />
         </Link>
       </div>
     )
