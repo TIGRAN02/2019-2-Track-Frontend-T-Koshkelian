@@ -2,8 +2,10 @@ import React from 'react'
 import PropTypes from 'prop-types'
 import autoBind from 'react-autobind'
 import Cookies from 'js-cookie'
+import Centrifuge from 'centrifuge'
+import Peer from 'peerjs'
 import Header from './Header'
-import { baseServer, emojiList } from '../settings'
+import { baseServer, baseCentrifuge, firstPeerId, secondPeerId, emojiList } from '../settings'
 import messageStyles from '../styles/singleMessageStyles.module.scss'
 import formStyles from '../styles/messageFormStyles.module.scss'
 import emojiStyles from '../styles/emojiStyles.module.scss'
@@ -112,17 +114,76 @@ class MessageForm extends React.Component {
     this.emojiWindow = this.makeEmojiWindow()
 
     this.mediaRecorder = null
+    this.centrifuge = null
+    this.peer = null
+    this.conn = null
   }
 
   componentDidMount() {
     checkAuth(this.state.userId).then((auth) => {
       if (!auth) {
         window.location.hash = '#/'
+      } else if (this.state.tag.includes('peerjs')) {
+        const currPeerId = this.state.userId === 1 ? firstPeerId : secondPeerId
+        this.peer = new Peer(currPeerId)
+        this.peer.on('open', () => {
+          this.peer.on('close', () => {
+            this.conn = null
+          })
+
+          this.peer.on('connection', (c) => {
+            if (!this.conn) {
+              this.conn = c
+              this.conn.on('open', () => {
+                this.conn.on('data', (message) => {
+                  this.addMessage(message, this.state.messages.length + 1)
+                })
+              })
+            }
+          })
+
+          setTimeout(this.openConnection, 1000)
+        })
       } else {
+        this.centrifuge = new Centrifuge(baseCentrifuge)
+        fetch(`${baseServer}/centrifugo/?id=${this.state.userId}`)
+          .then((res) => res.json())
+          .then(({ token }) => {
+            this.centrifuge.setToken(token)
+            this.centrifuge.subscribe(`chat:${this.state.tag}`, (resp) => {
+              if (resp.data.status === 'ok') {
+                this.addMessage(resp.data.message, this.state.messages.length + 1)
+              }
+            })
+            this.centrifuge.connect()
+          })
         this.getMessages(this.state.tag)
-        setInterval(() => this.getMessages(this.state.tag), 100)
       }
     })
+  }
+
+  componentWillUnmount() {
+    if (this.state.tag.includes('peerjs')) {
+      this.peer.destroy()
+      this.conn = null
+    } else {
+      this.centrifuge.disconnect()
+      this.centrifuge = null
+    }
+  }
+
+  // _____________connections_______________
+
+  openConnection() {
+    if (!this.conn) {
+      const otherPeerId = this.state.userId === 1 ? secondPeerId : firstPeerId
+      this.conn = this.peer.connect(otherPeerId)
+      this.conn.on('open', () => {
+        this.conn.on('data', (message) => {
+          this.addMessage(message, this.state.messages.length + 1)
+        })
+      })
+    }
   }
 
   // ______________messages_________________
@@ -134,28 +195,32 @@ class MessageForm extends React.Component {
         const { messages } = data
         const count = messages.length - this.state.messages.length - 1
         for (let i = count; i >= 0; i -= 1) {
-          const currProps = {}
-          currProps.time = messages[i].time
-          currProps.whose = messages[i].whose
-          currProps.userId = this.state.userId
-          currProps.key = messages.length - i
-          let currMessage
-          if (messages[i].type === 'text') {
-            currProps.content = messages[i].content
-            currMessage = singleTextMessage(currProps)
-          } else {
-            currProps.url = messages[i].url
-            if (messages[i].type === 'image') {
-              currMessage = singleImageMessage(currProps)
-            } else {
-              currMessage = singleAudioMessage(currProps)
-            }
-          }
-          this.setState((state) => {
-            return { messages: [currMessage, ...state.messages] }
-          })
+          this.addMessage(messages[i], messages.length - i)
         }
       })
+  }
+
+  addMessage(message, key) {
+    const currProps = {}
+    currProps.time = message.time
+    currProps.whose = message.whose
+    currProps.userId = this.state.userId
+    currProps.key = key
+    let currMessage
+    if (message.type === 'text') {
+      currProps.content = message.content
+      currMessage = singleTextMessage(currProps)
+    } else {
+      currProps.url = message.url
+      if (message.type === 'image') {
+        currMessage = singleImageMessage(currProps)
+      } else {
+        currMessage = singleAudioMessage(currProps)
+      }
+    }
+    this.setState((state) => {
+      return { messages: [currMessage, ...state.messages] }
+    })
   }
 
   // _____________geolocation_______________
@@ -174,13 +239,26 @@ class MessageForm extends React.Component {
   // _______________texts____________________
 
   sendTextMessage(content) {
-    fetch(`${baseServer}/chats/send_message/`, {
-      method: 'POST',
-      body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'text', content }),
-      headers: {
-        'X-CSRFToken': Cookies.get('csrftoken'),
-      },
-    }).then(() => {})
+    if (this.state.tag.includes('peerjs')) {
+      const curr = new Date()
+      const message = {
+        whose: this.state.userId,
+        time: `${curr.getHours()}:${curr.getMinutes()}`,
+        type: 'text',
+        content,
+      }
+      this.conn.send(message)
+      this.addMessage(message, this.state.messages.length + 1)
+    } else {
+      fetch(`${baseServer}/chats/send_message/`, {
+        method: 'POST',
+        body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'text', content }),
+        headers: {
+          'X-CSRFToken': Cookies.get('csrftoken'),
+          'Content-Type': 'application/json',
+        },
+      }).then(() => {})
+    }
   }
 
   handleTextSubmit(event) {
@@ -199,13 +277,25 @@ class MessageForm extends React.Component {
   // _______________images__________________
 
   sendImageMessage(url) {
-    fetch(`${baseServer}/chats/send_message/`, {
-      method: 'POST',
-      body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'image', url }),
-      headers: {
-        'X-CSRFToken': Cookies.get('csrftoken'),
-      },
-    }).then(() => {})
+    if (this.state.tag.includes('peerjs')) {
+      const curr = new Date()
+      const message = {
+        whose: this.state.userId,
+        time: `${curr.getHours()}:${curr.getMinutes()}`,
+        type: 'image',
+        url,
+      }
+      this.conn.send(message)
+    } else {
+      fetch(`${baseServer}/chats/send_message/`, {
+        method: 'POST',
+        body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'image', url }),
+        headers: {
+          'X-CSRFToken': Cookies.get('csrftoken'),
+          'Content-Type': 'application/json',
+        },
+      }).then(() => {})
+    }
   }
 
   handleImageSubmit(files) {
@@ -231,13 +321,25 @@ class MessageForm extends React.Component {
   // _______________audio____________________
 
   sendAudioMessage(url) {
-    fetch(`${baseServer}/chats/send_message/`, {
-      method: 'POST',
-      body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'audio', url }),
-      headers: {
-        'X-CSRFToken': Cookies.get('csrftoken'),
-      },
-    }).then(() => {})
+    if (this.state.tag.includes('peerjs')) {
+      const curr = new Date()
+      const message = {
+        whose: this.state.userId,
+        time: `${curr.getHours()}:${curr.getMinutes()}`,
+        type: 'audio',
+        url,
+      }
+      this.conn.send(message)
+    } else {
+      fetch(`${baseServer}/chats/send_message/`, {
+        method: 'POST',
+        body: JSON.stringify({ chat_tag: this.state.tag, user_id: this.state.userId, type: 'audio', url }),
+        headers: {
+          'X-CSRFToken': Cookies.get('csrftoken'),
+          'Content-Type': 'application/json',
+        },
+      }).then(() => {})
+    }
   }
 
   dataAvailable(event) {
@@ -323,7 +425,7 @@ class MessageForm extends React.Component {
         innerArray.push(
           <div
             key={j}
-            className={`${emojiStyles[emojiList[i * n + j]]} ${emojiStyles.in_menu}`}
+            className={`${emojiStyles[`${emojiList[i * n + j]}_in_menu`]}`}
             onClick={(event) => {
               event.stopPropagation()
               this.setState((state) => {
@@ -381,6 +483,7 @@ class MessageForm extends React.Component {
           />
           <div
             className={`${imagesStyles.cowboy_hat_face} ${formStyles.img}`}
+            style={{ maxWidth: '50px' }}
             onClick={(event) => {
               event.stopPropagation()
               this.setState((state) => {
