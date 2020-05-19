@@ -1,0 +1,15 @@
+{
+  "short_name": "Hummingbird",
+  "name": "Hummingbird Messenger",
+  "icons": [
+    {
+      "src": "hummingbird.png",
+      "sizes": "502x502",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/2019-2-Track-Frontend-T-Koshkelian/#/",
+  "display": "fullscreen",
+  "theme_color": "#105629",
+  "background_color": "#562804"
+}
